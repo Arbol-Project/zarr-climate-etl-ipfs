@@ -254,10 +254,8 @@ class TestS3:
 
     @staticmethod
     def test_write_metadata_only(tmpdir):
-        with open(tmpdir / ".zmetadata", "w") as f:
-            json.dump({"metadata": {".zattrs": {"meta": "data"}}}, f)
-        with open(tmpdir / ".zattrs", "w") as f:
-            json.dump({"attr": "ibute"}, f)
+        with open(tmpdir / "zarr.json", "w") as f:
+            json.dump({"attributes": {"meta": "data"}}, f)
 
         store = store_module.S3(mock.Mock(custom_output_path=tmpdir), "bucket")
         store.fs = mock.Mock()
@@ -268,142 +266,8 @@ class TestS3:
 
         store.fs.assert_called_once_with()
 
-        with open(tmpdir / ".zmetadata") as f:
-            assert json.load(f) == {"metadata": {".zattrs": {"meta": "data", "new": "value"}}}
-
-        with open(tmpdir / ".zattrs") as f:
-            assert json.load(f) == {"attr": "ibute", "new": "value"}
-
-
-class TestIPLD:
-    @staticmethod
-    def test_mapper(mocker):
-        ipldstore = mocker.patch("gridded_etl_tools.utils.store.ipldstore")
-        mapper = ipldstore.get_ipfs_mapper.return_value
-
-        dm = mock.Mock(requested_ipfs_chunker=None, latest_hash=mock.Mock(return_value="thelatestgreatest"))
-        store = store_module.IPLD(dm)
-        assert store.mapper() is mapper
-        assert store.mapper() is mapper  # Second call uses cached object
-
-        ipldstore.get_ipfs_mapper.assert_called_once_with(host=dm._host)
-        mapper.set_root.assert_called_once_with("thelatestgreatest")
-
-    @staticmethod
-    def test_mapper_refresh(mocker):
-        ipldstore = mocker.patch("gridded_etl_tools.utils.store.ipldstore")
-        mapper = ipldstore.get_ipfs_mapper.return_value
-
-        dm = mock.Mock(requested_ipfs_chunker=None, latest_hash=mock.Mock(return_value="thelatestgreatest"))
-        store = store_module.IPLD(dm)
-        store._mapper = object()
-        assert store.mapper(refresh=True) is mapper
-
-        ipldstore.get_ipfs_mapper.assert_called_once_with(host=dm._host)
-        mapper.set_root.assert_called_once_with("thelatestgreatest")
-
-    @staticmethod
-    def test_mapper_with_chunker(mocker):
-        ipldstore = mocker.patch("gridded_etl_tools.utils.store.ipldstore")
-        mapper = ipldstore.get_ipfs_mapper.return_value
-
-        dm = mock.Mock(requested_ipfs_chunker="rockyroad", latest_hash=mock.Mock(return_value="thelatestgreatest"))
-        store = store_module.IPLD(dm)
-        assert store.mapper() is mapper
-        assert store.mapper() is mapper  # Second call uses cached object
-
-        ipldstore.get_ipfs_mapper.assert_called_once_with(host=dm._host, chunker="rockyroad")
-        mapper.set_root.assert_called_once_with("thelatestgreatest")
-
-    @staticmethod
-    def test_mapper_do_not_set_root(mocker):
-        ipldstore = mocker.patch("gridded_etl_tools.utils.store.ipldstore")
-        mapper = ipldstore.get_ipfs_mapper.return_value
-
-        dm = mock.Mock(requested_ipfs_chunker=None, latest_hash=mock.Mock(return_value="thelatestgreatest"))
-        store = store_module.IPLD(dm)
-        assert store.mapper(set_root=False) is mapper
-
-        ipldstore.get_ipfs_mapper.assert_called_once_with(host=dm._host)
-        mapper.set_root.assert_not_called()
-
-    @staticmethod
-    def test_mapper_no_existing_root(mocker):
-        ipldstore = mocker.patch("gridded_etl_tools.utils.store.ipldstore")
-        mapper = ipldstore.get_ipfs_mapper.return_value
-
-        dm = mock.Mock(requested_ipfs_chunker=None, latest_hash=mock.Mock(return_value=None))
-        store = store_module.IPLD(dm)
-        assert store.mapper() is mapper
-
-        ipldstore.get_ipfs_mapper.assert_called_once_with(host=dm._host)
-        mapper.set_root.assert_not_called()
-
-    @staticmethod
-    def test___str__():
-        dm = mock.Mock(latest_hash=mock.Mock(return_value="thelatestgreatest"))
-        store = store_module.IPLD(dm)
-        assert str(store) == "/ipfs/thelatestgreatest"
-
-    @staticmethod
-    def test___str__no_hash():
-        dm = mock.Mock(latest_hash=mock.Mock(return_value=None))
-        store = store_module.IPLD(dm)
-        assert str(store) == "/ipfs/"
-
-    @staticmethod
-    def test_path():
-        dm = mock.Mock(latest_hash=mock.Mock(return_value="thelatestgreatest"))
-        store = store_module.IPLD(dm)
-        assert store.path == "/ipfs/thelatestgreatest"
-
-    @staticmethod
-    def test_path_no_hash():
-        dm = mock.Mock(latest_hash=mock.Mock(return_value=None))
-        store = store_module.IPLD(dm)
-        assert store.path is None
-
-    @staticmethod
-    def test_has_existing():
-        dm = mock.Mock(latest_hash=mock.Mock(return_value="thelatestgreatest"))
-        store = store_module.IPLD(dm)
-        assert store.has_existing is True
-
-    @staticmethod
-    def test_has_existing_no_hash():
-        dm = mock.Mock(latest_hash=mock.Mock(return_value=None))
-        store = store_module.IPLD(dm)
-        assert store.has_existing is False
-
-    @staticmethod
-    def test_write_metadata_only():
-        store = store_module.IPLD(None)
-        with pytest.raises(NotImplementedError):
-            store.write_metadata_only({})
-
-    @staticmethod
-    def test_metadata_exists():
-        store = store_module.IPLD(None)
-        with pytest.raises(NotImplementedError):
-            store.metadata_exists("Medium", "Place")
-
-    @staticmethod
-    def test_push_metadata():
-        store = store_module.IPLD(None)
-        with pytest.raises(NotImplementedError):
-            store.push_metadata("Pobody's", {}, "Nerfect")
-
-    @staticmethod
-    def test_retrieve_metadata():
-        store = store_module.IPLD(None)
-        with pytest.raises(NotImplementedError):
-            store.retrieve_metadata("Holy", "Shirt")
-
-    @staticmethod
-    def test_get_metadata_path():
-        store = store_module.IPLD(None)
-        with pytest.raises(NotImplementedError):
-            store.get_metadata_path("Jeremy", "Bearimy")
+        with open(tmpdir / "zarr.json") as f:
+            assert json.load(f) == {"attributes": {"meta": "data", "new": "value"}}
 
 
 class TestLocal:
@@ -557,16 +421,11 @@ class TestLocal:
 
     @staticmethod
     def test_write_metadata_only(tmpdir):
-        with open(tmpdir / ".zmetadata", "w") as f:
-            json.dump({"metadata": {".zattrs": {"meta": "data"}}}, f)
-        with open(tmpdir / ".zattrs", "w") as f:
-            json.dump({"attr": "ibute"}, f)
+        with open(tmpdir / "zarr.json", "w") as f:
+            json.dump({"attributes": {"meta": "data"}}, f)
 
         store = store_module.Local(mock.Mock(custom_output_path=tmpdir))
         store.write_metadata_only({"new": "value"})
 
-        with open(tmpdir / ".zmetadata") as f:
-            assert json.load(f) == {"metadata": {".zattrs": {"meta": "data", "new": "value"}}}
-
-        with open(tmpdir / ".zattrs") as f:
-            assert json.load(f) == {"attr": "ibute", "new": "value"}
+        with open(tmpdir / "zarr.json") as f:
+            assert json.load(f) == {"attributes": {"meta": "data", "new": "value"}}

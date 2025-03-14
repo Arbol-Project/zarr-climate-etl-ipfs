@@ -10,9 +10,7 @@ from unittest.mock import Mock
 
 from ..common import (
     clean_up_input_paths,
-    empty_ipns_publish,
     get_manager,
-    offline_ipns_publish,
     patched_key,
     patched_root_stac_catalog,
     patched_zarr_json_path,
@@ -87,7 +85,6 @@ def setup_and_teardown_per_test(
     initial_smaller_input_path,
     appended_input_path,
     appended_input_path_with_hole,
-    create_heads_file_for_testing,
     create_input_directories,
     simulate_file_download,
     simulate_file_download_hole,
@@ -96,7 +93,6 @@ def setup_and_teardown_per_test(
     Call the setup functions first, in a chain ending with `simulate_file_download`.
     Next run the test in question. Finally, remove generated inputs afterwards, even if the test fails.
     """
-    # Force ipns_publish to use offline mode to make tests run faster
     mocker.patch("gridded_etl_tools.dataset_manager.DatasetManager.key", patched_key)
     mocker.patch("examples.managers.chirps.CHIRPS.collection", return_value="CHIRPS_test")
     mocker.patch(
@@ -106,10 +102,6 @@ def setup_and_teardown_per_test(
     mocker.patch(
         "gridded_etl_tools.dataset_manager.DatasetManager.default_root_stac_catalog",
         patched_root_stac_catalog,
-    )
-    mocker.patch(
-        "gridded_etl_tools.dataset_manager.DatasetManager.ipns_publish",
-        empty_ipns_publish,
     )
     yield  # run the tests first
     # delete temp files
@@ -145,14 +137,7 @@ def test_extract(mocker, manager_class, heads_path, test_chunks, extracted_input
     "test_".
     """
     # Get the CHIRPS manager with rebuild set
-    manager = manager_class(custom_input_path=extracted_input_path, rebuild_requested=True, store="ipld")
-    manager.HASH_HEADS_PATH = heads_path
-    # Remove IPNS publish mocker on the first run of the dataset, so it lives as "dataset_test" in your IPNS registry
-    if manager.key() not in manager.ipns_key_list():  # pragma NO COVER
-        mocker.patch(
-            "gridded_etl_tools.dataset_manager.DatasetManager.ipns_publish",
-            offline_ipns_publish,
-        )
+    manager = manager_class(custom_input_path=extracted_input_path, rebuild_requested=True, store="local")
     manager.check_if_new_data = Mock(return_value=True)
     # Overriding the default time chunk to enable testing chunking with a smaller set of times
     manager.requested_dask_chunks = test_chunks
@@ -171,11 +156,7 @@ def test_initial_dry_run(mocker, manager_class, heads_path, test_chunks, initial
     Test that a dry run parse of CHIRPS data does not, in fact, parse data.
     """
     # Get the CHIRPS manager with rebuild set
-    manager = manager_class(custom_input_path=initial_input_path, rebuild_requested=True, dry_run=True, store="ipld")
-    manager.HASH_HEADS_PATH = heads_path
-    # Remove IPNS publish mocker on the first run of the dataset, so it lives as "dataset_test" in your IPNS registry
-    if manager.key() not in manager.ipns_key_list():  # pragma NO COVER
-        mocker.patch("gridded_etl_tools.dataset_manager.DatasetManager.ipns_publish", offline_ipns_publish)
+    manager = manager_class(custom_input_path=initial_input_path, rebuild_requested=True, dry_run=True, store="local")
     # Overriding the default time chunk to enable testing chunking with a smaller set of times
     manager.requested_dask_chunks = test_chunks
     manager.requested_zarr_chunks = test_chunks
@@ -195,14 +176,7 @@ def test_initial(mocker, manager_class, heads_path, test_chunks, initial_input_p
     "test_".
     """
     # Get the CHIRPS manager with rebuild set
-    manager = manager_class(custom_input_path=initial_input_path, rebuild_requested=True, store="ipld")
-    manager.HASH_HEADS_PATH = heads_path
-    # Remove IPNS publish mocker on the first run of the dataset, so it lives as "dataset_test" in your IPNS registry
-    if manager.key() not in manager.ipns_key_list():  # pragma NO COVER
-        mocker.patch(
-            "gridded_etl_tools.dataset_manager.DatasetManager.ipns_publish",
-            offline_ipns_publish,
-        )
+    manager = manager_class(custom_input_path=initial_input_path, rebuild_requested=True, store="local")
     # Overriding the default time chunk to enable testing chunking with a smaller set of times
     manager.requested_dask_chunks = test_chunks
     manager.requested_zarr_chunks = test_chunks
@@ -212,7 +186,7 @@ def test_initial(mocker, manager_class, heads_path, test_chunks, initial_input_p
     manager.parse(publish_dataset)
     manager.publish_metadata()
     manager.zarr_json_path().unlink(missing_ok=True)
-    # Open the head with ipldstore + xarray.open_zarr and compare two data points with the same data points in a local
+    # Open the head with localstore + xarray.open_zarr and compare two data points with the same data points in a local
     # GRIB file
     generated_dataset = manager.zarr_hash_to_dataset(manager.latest_hash())
     lat, lon = 14.625, -91.375
@@ -260,8 +234,7 @@ def test_append_only(mocker, manager_class, heads_path, test_chunks, appended_in
     Test an update of chirps data by adding new data to the end of existing data.
     """
     # Get a non-rebuild manager for testing append
-    manager = manager_class(custom_input_path=appended_input_path, store="ipld")
-    manager.HASH_HEADS_PATH = heads_path
+    manager = manager_class(custom_input_path=appended_input_path, store="local")
     # Overriding the default time chunk to enable testing chunking with a smaller set of times
     manager.requested_dask_chunks = test_chunks
     manager.requested_zarr_chunks = test_chunks
@@ -272,9 +245,9 @@ def test_append_only(mocker, manager_class, heads_path, test_chunks, appended_in
     publish_dataset = manager.transform_dataset_in_memory()
     manager.parse(publish_dataset)
     manager.publish_metadata()
-    # Open the head with ipldstore + xarray.open_zarr and compare two data points with the same data points in a local
+    # Open the head with localstore + xarray.open_zarr and compare two data points with the same data points in a local
     # GRIB file
-    generated_dataset = manager.zarr_hash_to_dataset(manager.dataset_hash)
+    generated_dataset = manager.zarr_json_to_dataset(manager.store.path)
     lat, lon = 14.625, -91.375
     # Validate one row of data
     output_value = (
@@ -300,8 +273,7 @@ def test_bad_append(
     Test an update of chirps data by adding new data to the end of existing data.
     """
     # Get a non-rebuild manager for testing append
-    manager = manager_class(custom_input_path=appended_input_path_with_hole, store="ipld")
-    manager.HASH_HEADS_PATH = heads_path
+    manager = manager_class(custom_input_path=appended_input_path_with_hole, store="local")
     manager.zarr_chunks = {}
     # Overriding the default time chunk to enable testing chunking with a smaller set of times
     manager.requested_dask_chunks = test_chunks
@@ -317,11 +289,10 @@ def test_metadata(manager_class, heads_path):
     """
     Test an update of CHIRPS metadata.
 
-    This function will only work after the test dataset's metadata has been populated into IPFS and the IPNS key list.
+    This function will only work after the test dataset's metadata has been populated
     """
     # Get a non-rebuild manager for testing metadata creation
-    manager = manager_class(store="ipld")
-    manager.HASH_HEADS_PATH = heads_path
+    manager = manager_class(store="local")
     manager.publish_metadata()
     assert manager.load_stac_metadata() != {}
 
@@ -338,24 +309,18 @@ def test_misaligned_zarr_dask_chunks_regression(
     is addressed. If the test fails then the most likely suspect is a problem with rechunking here.
     """
     # run initial with a dataset whose time dimension is smaller (25) than the specified dask chunks (50)
-    manager = manager_class(custom_input_path=initial_smaller_input_path, store="ipld")
+    manager = manager_class(custom_input_path=initial_smaller_input_path, store="local")
     # Override nan frequency defaults since the test data doesn't cover oceans, which are NaNs in CHIRPS
     manager.expected_nan_frequency = 0.02
-    # Remove IPNS publish mocker on the first run of the dataset, so it lives as "dataset_test" in your IPNS registry
-    if manager.key() not in manager.ipns_key_list():  # pragma NO COVER
-        mocker.patch(
-            "gridded_etl_tools.dataset_manager.DatasetManager.ipns_publish",
-            offline_ipns_publish,
-        )
     manager.transform_data_on_disk()
     publish_dataset = manager.transform_dataset_in_memory()
     manager.parse(publish_dataset)
     manager.publish_metadata()
     # Test an append on this curtailed dataset
-    # run_etl(manager_class, input_path=appended_input_path, store="ipld")
+    # run_etl(manager_class, input_path=appended_input_path, store="local")
 
     # run initial with a dataset whose time dimension is smaller (25) than the specified dask chunks (50)
-    manager = manager_class(custom_input_path=appended_input_path, store="ipld")
+    manager = manager_class(custom_input_path=appended_input_path, store="local")
     # Override nan frequency defaults since the test data doesn't cover oceans, which are NaNs in CHIRPS
     manager.expected_nan_frequency = 0.02
     # run the ETL
